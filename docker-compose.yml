@@ -1,0 +1,60 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sitecheck
+    ports:
+      # 5433 on your PC, because a locally installed PostgreSQL usually already uses 5432.
+      # Inside the Docker network the database still listens on 5432.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # schema.sql then seed.sql run automatically, but only when the volume is empty (first start)
+      - ./database:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sitecheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: on-failure
+    environment:
+      # "db" is the service name above. Compose gives every service a hostname on its private network.
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/sitecheck
+      CLIENT_URL: http://localhost:5173
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Browser calls the backend from your PC, so use localhost, not "db"/"backend"
+        VITE_API_URL: http://localhost:8000
+    ports:
+      # 5173 on your PC → nginx listens on 80 inside the container
+      - "5173:80"
+    depends_on:
+      - backend
+
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      # 5050 on your PC → pgAdmin web UI listens on 80 inside the container
+      - "5050:80"
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
